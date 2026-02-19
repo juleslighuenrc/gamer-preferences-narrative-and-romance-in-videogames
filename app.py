@@ -394,6 +394,7 @@ def update_dashboard(_n_intervals):
         def optimal_graph(col: str):
             title = col.replace("_", " ").title()
             unique_vals = df[col].nunique(dropna=False)
+            normalized_col = col.strip().lower()
 
             if pd.api.types.is_numeric_dtype(df[col]) and unique_vals > 10:
                 fig = px.histogram(df, x=col, color_discrete_sequence=color_discrete)
@@ -404,7 +405,10 @@ def update_dashboard(_n_intervals):
                 return count_bar(df, col, title, horizontal=True)
 
             fig = count_bar(df, col, title, horizontal=False)
-            if col == "genres":
+            if (
+                normalized_col == "genres"
+                or "what games do you enjoy the most" in normalized_col
+            ):
                 fig.update_xaxes(tickangle=45, automargin=True)
             return fig
 
