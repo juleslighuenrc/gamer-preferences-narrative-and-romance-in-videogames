@@ -25,5 +25,7 @@ services:
         value: "true"
       - key: SYNC_INTERVAL_SECONDS
         value: "2"
+      - key: DASHBOARD_SOURCE
+        value: "sheets"
       - key: DASH_DEBUG
         value: "false"

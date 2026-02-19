@@ -28,6 +28,7 @@ load_local_env()
 
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "2"))
 SYNC_FROM_GOOGLE_SHEETS = os.getenv("SYNC_FROM_GOOGLE_SHEETS", "true").lower() == "true"
+DASHBOARD_SOURCE = os.getenv("DASHBOARD_SOURCE", "sheets").strip().lower()
 _last_sync_epoch = 0.0
 
 
@@ -144,11 +145,14 @@ def sync_google_sheet_to_mysql() -> None:
 
 
 def fetch_data() -> pd.DataFrame:
-    conn = get_db_connection()
-    try:
-        return pd.read_sql("SELECT * FROM survey_responses", conn)
-    finally:
-        conn.close()
+    if DASHBOARD_SOURCE == "sql":
+        conn = get_db_connection()
+        try:
+            return pd.read_sql("SELECT * FROM survey_responses", conn)
+        finally:
+            conn.close()
+
+    return fetch_google_sheet_dataframe()
 
 
 def apply_figure_style(fig, title_text: str):
@@ -229,7 +233,10 @@ app.layout = html.Div(
     [dash.dependencies.Input("refresh-interval", "n_intervals")],
 )
 def update_dashboard(_n_intervals):
-    sync_google_sheet_to_mysql()
+    try:
+        sync_google_sheet_to_mysql()
+    except Exception:
+        pass
     df = fetch_data()
 
     drop_cols = {"timestamp", "marca temporal", "id"}

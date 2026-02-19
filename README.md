@@ -42,9 +42,12 @@ Open: `http://127.0.0.1:8050/`
 
 ## Data Flow (Google Sheets + SQL)
 
-- The dashboard always reads from `survey_responses` in MySQL.
+- Default mode: dashboard reads directly from Google Sheets (`DASHBOARD_SOURCE=sheets`).
+- SQL remains your database and is continuously updated from Google Sheets.
+- You can switch dashboard source to SQL at any time (`DASHBOARD_SOURCE=sql`).
 - On each cycle, the app syncs new Google Sheets rows into MySQL.
 - Set these variables in `.env` or Render:
+  - `DASHBOARD_SOURCE=sheets` (recommended public mode)
   - `GOOGLE_SHEET_NAME`
   - `GOOGLE_WORKSHEET_NAME` (optional)
   - `GOOGLE_SERVICE_ACCOUNT_JSON` (recommended for cloud) or `GOOGLE_CLIENT_SECRET_FILE` (local)
