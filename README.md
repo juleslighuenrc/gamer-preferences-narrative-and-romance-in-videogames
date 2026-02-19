@@ -7,6 +7,7 @@ Dash dashboard for survey responses with anonymized configuration for safe GitHu
 - Responsive multi-chart dashboard (no overlapping/smashed graphs)
 - Auto-refresh every 2 seconds for near real-time survey updates
 - Explicit dark color palette (avoids white/washed-out bars)
+- SQL-first architecture with automatic Google Sheets -> SQL synchronization
 - Global typography styling:
   - Titles: Arial, 12, bold, black
   - Other text: Arial, 9, black
@@ -38,6 +39,17 @@ python app.py
 ```
 
 Open: `http://127.0.0.1:8050/`
+
+## Data Flow (Google Sheets + SQL)
+
+- The dashboard always reads from `survey_responses` in MySQL.
+- On each cycle, the app syncs new Google Sheets rows into MySQL.
+- Set these variables in `.env` or Render:
+  - `GOOGLE_SHEET_NAME`
+  - `GOOGLE_WORKSHEET_NAME` (optional)
+  - `GOOGLE_SERVICE_ACCOUNT_JSON` (recommended for cloud) or `GOOGLE_CLIENT_SECRET_FILE` (local)
+  - `SYNC_FROM_GOOGLE_SHEETS=true`
+  - `SYNC_INTERVAL_SECONDS=2`
 
 ## Privacy / Security
 

@@ -1,10 +1,14 @@
 import os
+import json
+import time
 
 import dash
 from dash import dcc, html
+import gspread
 import mysql.connector
 import pandas as pd
 import plotly.express as px
+from oauth2client.service_account import ServiceAccountCredentials
 
 
 def load_local_env(path: str = ".env") -> None:
@@ -22,6 +26,11 @@ def load_local_env(path: str = ".env") -> None:
 load_local_env()
 
 
+SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "2"))
+SYNC_FROM_GOOGLE_SHEETS = os.getenv("SYNC_FROM_GOOGLE_SHEETS", "true").lower() == "true"
+_last_sync_epoch = 0.0
+
+
 color_discrete = [
     "#0B132B", "#1C2541", "#3A506B", "#5BC0BE", "#6FFFE9",
     "#5E548E", "#9F86C0", "#BE95C4", "#E0B1CB", "#7B2CBF",
@@ -29,14 +38,113 @@ color_discrete = [
 ]
 
 
-def fetch_data() -> pd.DataFrame:
-    conn = mysql.connector.connect(
+def get_db_connection():
+    return mysql.connector.connect(
         host=os.getenv("DB_HOST", "localhost"),
         user=os.getenv("DB_USER", "root"),
         password=os.getenv("DB_PASSWORD", ""),
         database=os.getenv("DB_NAME", "survey_db"),
         use_pure=True,
     )
+
+
+def fetch_google_sheet_dataframe() -> pd.DataFrame:
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
+    credentials = None
+    service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if service_account_json:
+        credentials_dict = json.loads(service_account_json)
+        credentials = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+    else:
+        client_secret_file = os.getenv("GOOGLE_CLIENT_SECRET_FILE", "clientsecret.json")
+        credentials = ServiceAccountCredentials.from_json_keyfile_name(client_secret_file, scope)
+
+    client = gspread.authorize(credentials)
+    sheet_name = os.getenv("GOOGLE_SHEET_NAME", "")
+    worksheet_name = os.getenv("GOOGLE_WORKSHEET_NAME", "")
+
+    if not sheet_name:
+        raise ValueError("GOOGLE_SHEET_NAME is required for synchronization.")
+
+    spreadsheet = client.open(sheet_name)
+    worksheet = spreadsheet.worksheet(worksheet_name) if worksheet_name else spreadsheet.sheet1
+    records = worksheet.get_all_records()
+    return pd.DataFrame(records)
+
+
+def sync_google_sheet_to_mysql() -> None:
+    global _last_sync_epoch
+
+    if not SYNC_FROM_GOOGLE_SHEETS:
+        return
+
+    current_time = time.time()
+    if current_time - _last_sync_epoch < SYNC_INTERVAL_SECONDS:
+        return
+
+    sheet_df = fetch_google_sheet_dataframe()
+    if sheet_df.empty:
+        _last_sync_epoch = current_time
+        return
+
+    expected_columns = [
+        "timestamp",
+        "play_frequency",
+        "platform",
+        "genres",
+        "matters_most",
+        "preference",
+        "story_importance",
+        "romance_importance",
+        "romance_engagement",
+        "romance_preference",
+        "player_gender",
+        "identity",
+        "orientation_importance",
+        "orientation",
+        "inclusive_interest",
+    ]
+
+    source_columns = {column.lower(): column for column in sheet_df.columns}
+    normalized_rows = []
+    for _, row in sheet_df.iterrows():
+        values = []
+        for expected_col in expected_columns:
+            original_col = source_columns.get(expected_col)
+            cell_value = row[original_col] if original_col in row else None
+            values.append(None if pd.isna(cell_value) else str(cell_value))
+        normalized_rows.append(tuple(values))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT timestamp FROM survey_responses")
+        existing_timestamps = {str(item[0]) for item in cursor.fetchall() if item[0] is not None}
+
+        rows_to_insert = [row for row in normalized_rows if row[0] and row[0] not in existing_timestamps]
+        if rows_to_insert:
+            insert_sql = """
+                INSERT INTO survey_responses (
+                    timestamp, play_frequency, platform, genres, matters_most, preference,
+                    story_importance, romance_importance, romance_engagement, romance_preference,
+                    player_gender, identity, orientation_importance, orientation, inclusive_interest
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            cursor.executemany(insert_sql, rows_to_insert)
+            conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    _last_sync_epoch = current_time
+
+
+def fetch_data() -> pd.DataFrame:
+    conn = get_db_connection()
     try:
         return pd.read_sql("SELECT * FROM survey_responses", conn)
     finally:
@@ -121,6 +229,7 @@ app.layout = html.Div(
     [dash.dependencies.Input("refresh-interval", "n_intervals")],
 )
 def update_dashboard(_n_intervals):
+    sync_google_sheet_to_mysql()
     df = fetch_data()
 
     drop_cols = {"timestamp", "marca temporal", "id"}
