@@ -75,3 +75,12 @@ git add .
 git commit -m "Sanitize secrets and add dashboard + docs"
 git push
 ```
+
+### One-command private publish (recommended)
+
+After authenticating with GitHub CLI:
+
+```powershell
+gh auth login --web
+powershell -ExecutionPolicy Bypass -File .\publish_to_github.ps1
+```
