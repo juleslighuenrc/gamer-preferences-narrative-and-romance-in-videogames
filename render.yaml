@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:server --workers 2 --threads 4 --timeout 60
+    startCommand: gunicorn app:server --workers 1 --threads 4 --timeout 60
     autoDeploy: true
     envVars:
       - key: DB_HOST
@@ -28,7 +28,11 @@ services:
       - key: DASHBOARD_SOURCE
         value: "sql"
       - key: DASHBOARD_REFRESH_SECONDS
-        value: "30"
+        value: "60"
+      - key: DASHBOARD_CACHE_SECONDS
+        value: "120"
+      - key: RUN_SYNC_IN_REQUEST
+        value: "false"
       - key: ENABLE_SOURCE_FALLBACK
         value: "false"
       - key: MYSQL_CONNECT_TIMEOUT_SECONDS

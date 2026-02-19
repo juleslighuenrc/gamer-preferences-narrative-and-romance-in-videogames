@@ -33,11 +33,15 @@ logger = logging.getLogger(__name__)
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "120"))
 SYNC_FROM_GOOGLE_SHEETS = os.getenv("SYNC_FROM_GOOGLE_SHEETS", "true").lower() == "true"
 DASHBOARD_SOURCE = os.getenv("DASHBOARD_SOURCE", "sql").strip().lower()
-DASHBOARD_REFRESH_SECONDS = int(os.getenv("DASHBOARD_REFRESH_SECONDS", "30"))
+DASHBOARD_REFRESH_SECONDS = int(os.getenv("DASHBOARD_REFRESH_SECONDS", "60"))
 ENABLE_SOURCE_FALLBACK = os.getenv("ENABLE_SOURCE_FALLBACK", "false").lower() == "true"
 MYSQL_CONNECT_TIMEOUT_SECONDS = int(os.getenv("MYSQL_CONNECT_TIMEOUT_SECONDS", "5"))
 MYSQL_READ_TIMEOUT_SECONDS = int(os.getenv("MYSQL_READ_TIMEOUT_SECONDS", "15"))
+RUN_SYNC_IN_REQUEST = os.getenv("RUN_SYNC_IN_REQUEST", "false").lower() == "true"
+DASHBOARD_CACHE_SECONDS = int(os.getenv("DASHBOARD_CACHE_SECONDS", "120"))
 _last_sync_epoch = 0.0
+_last_dashboard_epoch = 0.0
+_cached_dashboard_children = None
 
 
 color_discrete = [
@@ -314,15 +318,28 @@ app.layout = html.Div(
     [dash.dependencies.Input("refresh-interval", "n_intervals")],
 )
 def update_dashboard(_n_intervals):
-    if DASHBOARD_SOURCE == "sql":
+    global _last_dashboard_epoch, _cached_dashboard_children
+
+    current_time = time.time()
+    if (
+        _cached_dashboard_children is not None
+        and current_time - _last_dashboard_epoch < DASHBOARD_CACHE_SECONDS
+    ):
+        return _cached_dashboard_children
+
+    if RUN_SYNC_IN_REQUEST and DASHBOARD_SOURCE == "sql":
         try:
             sync_google_sheet_to_mysql()
         except Exception:
             logger.exception("Google Sheets to MySQL sync failed")
+
     try:
         df = fetch_data()
     except Exception:
         logger.exception("Fetching dashboard data failed")
+        if _cached_dashboard_children is not None:
+            logger.warning("Serving stale cached dashboard due to data fetch failure")
+            return _cached_dashboard_children
         return html.Div(
             "Dashboard is online, but data is not available yet. Check GOOGLE_SHEET_NAME, GOOGLE_SERVICE_ACCOUNT_JSON, and Google Sheet sharing permissions.",
             style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
@@ -475,9 +492,15 @@ def update_dashboard(_n_intervals):
         if priority_card_items:
             sections.append(priority_cards)
         sections.append(other_graphs)
-        return html.Div(sections)
+        dashboard_children = html.Div(sections)
+        _cached_dashboard_children = dashboard_children
+        _last_dashboard_epoch = current_time
+        return dashboard_children
     except Exception:
         logger.exception("Failed while building dashboard figures")
+        if _cached_dashboard_children is not None:
+            logger.warning("Serving stale cached dashboard due to render failure")
+            return _cached_dashboard_children
         return html.Div(
             "Data loaded, but chart rendering failed. Check Render logs for details.",
             style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
