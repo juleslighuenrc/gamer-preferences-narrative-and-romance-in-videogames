@@ -1,5 +1,7 @@
 # Gamer Preferences: Narrative and Romance in Videogames
 
+Link: https://gamer-preferences-dashboard.onrender.com/
+
 Dash Dashboard for Survey Responses (Anonymized & GitHub-safe)
 
 ## Project Overview
