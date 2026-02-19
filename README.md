@@ -6,6 +6,8 @@ Dash Dashboard for Survey Responses (Anonymized & GitHub-safe)
 
 ## Project Overview
 
+End-to-end data project: survey creation, deployment, processing, visualization. Used Google Sheets, SQL to mantain database, Python to link platforms together and create interactive dashboard visualization.
+
 This project is a Dash interactive dashboard for visualizing survey responses about gamer preferences regarding:
 - Narrative depth in videogames
 - Romance options and relationship systems
