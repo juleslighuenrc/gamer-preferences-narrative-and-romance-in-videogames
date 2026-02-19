@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import threading
+import re
 
 import dash
 from dash import dcc, html
@@ -58,7 +59,18 @@ COLUMN_ALIASES = {
     "timestamp": ["timestamp", "marca temporal", "time stamp"],
     "play_frequency": ["play_frequency", "play frequency"],
     "platform": ["platform", "plataforma"],
-    "genres": ["genres", "genre", "géneros", "generos"],
+    "genres": [
+        "genres",
+        "genre",
+        "géneros",
+        "generos",
+        "what game genres do you enjoy the most",
+        "what game genres do you enjoy the most select up to 2",
+        "what game genres do you enjoy the most select up to two",
+        "what games do you enjoy the most",
+        "what games do you enjoy the most select up to 2",
+        "what games do you enjoy the most select up to two",
+    ],
     "matters_most": ["matters_most", "matters most"],
     "preference": ["preference", "preferencia"],
     "story_importance": ["story_importance", "story importance", "narrative importance"],
@@ -73,10 +85,15 @@ COLUMN_ALIASES = {
 }
 
 
+def normalize_text(value: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(value).lower()).split())
+
+
 def normalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
     normalized = df.copy()
     normalized.columns = [str(column).strip() for column in normalized.columns]
     lower_to_actual = {column.lower(): column for column in normalized.columns}
+    normalized_to_actual = {normalize_text(column): column for column in normalized.columns}
 
     for canonical, candidates in COLUMN_ALIASES.items():
         existing = lower_to_actual.get(canonical)
@@ -87,6 +104,8 @@ def normalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
 
         for candidate in candidates:
             actual = lower_to_actual.get(candidate.lower())
+            if not actual:
+                actual = normalized_to_actual.get(normalize_text(candidate))
             if actual:
                 normalized = normalized.rename(columns={actual: canonical})
                 break
@@ -260,7 +279,21 @@ def apply_figure_style(fig, title_text: str):
     return fig
 
 
-MULTISELECT_COLUMNS = {"genres", "genre", "géneros", "generos", "what games do you enjoy the most? select up to two"}
+MULTISELECT_COLUMN_HINTS = (
+    "genres",
+    "genre",
+    "géneros",
+    "generos",
+    "what game genres do you enjoy the most",
+    "what games do you enjoy the most",
+    "select up to 2",
+    "select up to two",
+)
+
+
+def is_multiselect_column(column_name: str) -> bool:
+    normalized_col = normalize_text(column_name)
+    return any(normalize_text(hint) in normalized_col for hint in MULTISELECT_COLUMN_HINTS)
 
 
 def count_bar(df: pd.DataFrame, col: str, title: str, horizontal: bool = False, split_multiselect: bool = False):
@@ -394,7 +427,6 @@ def build_dashboard_children(df: pd.DataFrame):
     def optimal_graph(col: str):
         title = col.replace("_", " ").title()
         unique_vals = df[col].nunique(dropna=False)
-        normalized_col = col.strip().lower()
 
         if pd.api.types.is_numeric_dtype(df[col]) and unique_vals > 10:
             fig = px.histogram(df, x=col, color_discrete_sequence=color_discrete)
@@ -404,7 +436,7 @@ def build_dashboard_children(df: pd.DataFrame):
         if unique_vals <= 5:
             return count_bar(df, col, title, horizontal=True)
 
-        is_multiselect = normalized_col in MULTISELECT_COLUMNS or "what games do you enjoy the most" in normalized_col
+        is_multiselect = is_multiselect_column(col)
         fig = count_bar(df, col, title, horizontal=False, split_multiselect=is_multiselect)
         if is_multiselect:
             fig.update_xaxes(tickangle=45, automargin=True)
