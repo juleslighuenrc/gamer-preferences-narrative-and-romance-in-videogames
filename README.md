@@ -14,7 +14,7 @@ This project is a Dash interactive dashboard for visualizing survey responses ab
 - Player identity and character choices
 
 The dashboard is designed for:
-- Real-time or near real-time updates
+- Near real-time updates
 - Secure handling of credentials
 - Public publishing on GitHub without exposing sensitive data
 
@@ -82,7 +82,6 @@ http://127.0.0.1:8050/
 
 🔄 Data Flow (Google Sheets + SQL)
 
-- Default mode: dashboard reads directly from Google Sheets (DASHBOARD_SOURCE=sheets).
+- Default mode: dashboard reads directly from SQL (DASHBOARD_SOURCE=sql).
 - SQL remains database and is continuously updated from Google Sheets.
-- It is possible to switch dashboard source to SQL at any time (DASHBOARD_SOURCE=sql).
 - On each cycle, the app syncs new Google Sheets rows into MySQL.
