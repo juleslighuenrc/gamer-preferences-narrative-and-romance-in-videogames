@@ -217,4 +217,8 @@ def update_dashboard(_n_intervals):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run_server(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8050")),
+        debug=os.getenv("DASH_DEBUG", "false").lower() == "true",
+    )

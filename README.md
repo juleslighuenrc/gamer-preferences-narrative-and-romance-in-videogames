@@ -84,3 +84,27 @@ After authenticating with GitHub CLI:
 gh auth login --web
 powershell -ExecutionPolicy Bypass -File .\publish_to_github.ps1
 ```
+
+## Deploy Online (Render)
+
+This project is preconfigured for Render using `render.yaml`.
+
+### Option A: One-click Blueprint deploy
+
+Use this URL (while logged into Render):
+
+- `https://dashboard.render.com/blueprint/new?repo=https://github.com/juleslighuenrc/gamer-preferences-narrative-and-romance-in-videogames`
+
+### Option B: Manual Render setup
+
+1. In Render, create a new **Web Service** from your GitHub repository.
+2. Render will detect:
+  - Build command: `pip install -r requirements.txt`
+  - Start command: `gunicorn app:server`
+3. Add environment variables in Render:
+  - `DB_HOST`
+  - `DB_USER`
+  - `DB_PASSWORD`
+  - `DB_NAME`
+  - `DASH_DEBUG=false`
+4. Deploy and open the generated Render URL.
