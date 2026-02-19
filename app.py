@@ -38,6 +38,45 @@ color_discrete = [
     "#C77DFF", "#4895EF", "#4361EE", "#560BAD",
 ]
 
+COLUMN_ALIASES = {
+    "timestamp": ["timestamp", "marca temporal", "time stamp"],
+    "play_frequency": ["play_frequency", "play frequency"],
+    "platform": ["platform", "plataforma"],
+    "genres": ["genres", "genre", "géneros", "generos"],
+    "matters_most": ["matters_most", "matters most"],
+    "preference": ["preference", "preferencia"],
+    "story_importance": ["story_importance", "story importance", "narrative importance"],
+    "romance_importance": ["romance_importance", "romance importance"],
+    "romance_engagement": ["romance_engagement", "romance engagement"],
+    "romance_preference": ["romance_preference", "romance preference"],
+    "player_gender": ["player_gender", "player gender"],
+    "identity": ["identity", "gender identity"],
+    "orientation_importance": ["orientation_importance", "orientation importance"],
+    "orientation": ["orientation", "sexual orientation"],
+    "inclusive_interest": ["inclusive_interest", "inclusive interest"],
+}
+
+
+def normalize_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    normalized = df.copy()
+    normalized.columns = [str(column).strip() for column in normalized.columns]
+    lower_to_actual = {column.lower(): column for column in normalized.columns}
+
+    for canonical, candidates in COLUMN_ALIASES.items():
+        existing = lower_to_actual.get(canonical)
+        if existing:
+            if existing != canonical:
+                normalized = normalized.rename(columns={existing: canonical})
+            continue
+
+        for candidate in candidates:
+            actual = lower_to_actual.get(candidate.lower())
+            if actual:
+                normalized = normalized.rename(columns={actual: canonical})
+                break
+
+    return normalized
+
 
 def get_db_connection():
     return mysql.connector.connect(
@@ -87,7 +126,7 @@ def sync_google_sheet_to_mysql() -> None:
     if current_time - _last_sync_epoch < SYNC_INTERVAL_SECONDS:
         return
 
-    sheet_df = fetch_google_sheet_dataframe()
+    sheet_df = normalize_dataframe_columns(fetch_google_sheet_dataframe())
     if sheet_df.empty:
         _last_sync_epoch = current_time
         return
@@ -148,11 +187,11 @@ def fetch_data() -> pd.DataFrame:
     if DASHBOARD_SOURCE == "sql":
         conn = get_db_connection()
         try:
-            return pd.read_sql("SELECT * FROM survey_responses", conn)
+                return normalize_dataframe_columns(pd.read_sql("SELECT * FROM survey_responses", conn))
         finally:
             conn.close()
 
-    return fetch_google_sheet_dataframe()
+            return normalize_dataframe_columns(fetch_google_sheet_dataframe())
 
 
 def apply_figure_style(fig, title_text: str):
@@ -182,6 +221,16 @@ def apply_figure_style(fig, title_text: str):
 
 
 def count_bar(df: pd.DataFrame, col: str, title: str, horizontal: bool = False):
+    if col not in df.columns:
+        fig = px.bar(
+            pd.DataFrame({"value": ["No data available"], "count": [0]}),
+            x="value",
+            y="count",
+            color="value",
+            color_discrete_sequence=[color_discrete[0]],
+        )
+        return apply_figure_style(fig, title)
+
     counts = df[col].fillna("Missing").astype(str).value_counts().reset_index()
     counts.columns = ["value", "count"]
 
@@ -237,7 +286,19 @@ def update_dashboard(_n_intervals):
         sync_google_sheet_to_mysql()
     except Exception:
         pass
-    df = fetch_data()
+    try:
+        df = fetch_data()
+    except Exception:
+        return html.Div(
+            "Dashboard is online, but data is not available yet. Check GOOGLE_SHEET_NAME, GOOGLE_SERVICE_ACCOUNT_JSON, and Google Sheet sharing permissions.",
+            style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
+        )
+
+    if df.empty:
+        return html.Div(
+            "No rows found in the current data source yet.",
+            style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
+        )
 
     drop_cols = {"timestamp", "marca temporal", "id"}
     df = df.loc[:, [c for c in df.columns if c.lower() not in drop_cols]]
