@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:server
+    startCommand: gunicorn app:server --workers 2 --threads 4 --timeout 60
     autoDeploy: true
     envVars:
       - key: DB_HOST
@@ -24,8 +24,16 @@ services:
       - key: SYNC_FROM_GOOGLE_SHEETS
         value: "true"
       - key: SYNC_INTERVAL_SECONDS
-        value: "2"
+        value: "120"
       - key: DASHBOARD_SOURCE
-        value: "sheets"
+        value: "sql"
+      - key: DASHBOARD_REFRESH_SECONDS
+        value: "30"
+      - key: ENABLE_SOURCE_FALLBACK
+        value: "false"
+      - key: MYSQL_CONNECT_TIMEOUT_SECONDS
+        value: "5"
+      - key: MYSQL_READ_TIMEOUT_SECONDS
+        value: "15"
       - key: DASH_DEBUG
         value: "false"

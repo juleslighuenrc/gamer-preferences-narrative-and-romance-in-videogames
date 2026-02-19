@@ -30,9 +30,13 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 logger = logging.getLogger(__name__)
 
 
-SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "2"))
+SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "120"))
 SYNC_FROM_GOOGLE_SHEETS = os.getenv("SYNC_FROM_GOOGLE_SHEETS", "true").lower() == "true"
-DASHBOARD_SOURCE = os.getenv("DASHBOARD_SOURCE", "sheets").strip().lower()
+DASHBOARD_SOURCE = os.getenv("DASHBOARD_SOURCE", "sql").strip().lower()
+DASHBOARD_REFRESH_SECONDS = int(os.getenv("DASHBOARD_REFRESH_SECONDS", "30"))
+ENABLE_SOURCE_FALLBACK = os.getenv("ENABLE_SOURCE_FALLBACK", "false").lower() == "true"
+MYSQL_CONNECT_TIMEOUT_SECONDS = int(os.getenv("MYSQL_CONNECT_TIMEOUT_SECONDS", "5"))
+MYSQL_READ_TIMEOUT_SECONDS = int(os.getenv("MYSQL_READ_TIMEOUT_SECONDS", "15"))
 _last_sync_epoch = 0.0
 
 
@@ -89,6 +93,8 @@ def get_db_connection():
         password=os.getenv("DB_PASSWORD", ""),
         database=os.getenv("DB_NAME", "survey_db"),
         use_pure=True,
+        connection_timeout=MYSQL_CONNECT_TIMEOUT_SECONDS,
+        read_timeout=MYSQL_READ_TIMEOUT_SECONDS,
     )
 
 
@@ -205,9 +211,10 @@ def fetch_data() -> pd.DataFrame:
 
     primary = "sql" if DASHBOARD_SOURCE == "sql" else "sheets"
     secondary = "sheets" if primary == "sql" else "sql"
+    sources_to_try = (primary, secondary) if ENABLE_SOURCE_FALLBACK else (primary,)
 
     errors = []
-    for source in (primary, secondary):
+    for source in sources_to_try:
         try:
             df = loaders[source]()
             logger.info("Dashboard data source in use: %s", source)
@@ -296,7 +303,7 @@ app.layout = html.Div(
                 "marginBottom": "12px",
             },
         ),
-        dcc.Interval(id="refresh-interval", interval=2 * 1000, n_intervals=0),
+        dcc.Interval(id="refresh-interval", interval=DASHBOARD_REFRESH_SECONDS * 1000, n_intervals=0),
         html.Div(id="dashboard-content"),
     ],
 )
