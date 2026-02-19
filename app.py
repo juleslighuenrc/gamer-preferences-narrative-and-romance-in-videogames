@@ -201,7 +201,7 @@ def sync_google_sheet_to_mysql() -> None:
     _last_sync_epoch = current_time
 
 
-def fetch_data() -> pd.DataFrame:
+def fetch_data(force_fallback: bool = False) -> pd.DataFrame:
     def fetch_from_sql() -> pd.DataFrame:
         conn = get_db_connection()
         try:
@@ -219,7 +219,7 @@ def fetch_data() -> pd.DataFrame:
 
     primary = "sql" if DASHBOARD_SOURCE == "sql" else "sheets"
     secondary = "sheets" if primary == "sql" else "sql"
-    sources_to_try = (primary, secondary) if ENABLE_SOURCE_FALLBACK else (primary,)
+    sources_to_try = (primary, secondary) if (ENABLE_SOURCE_FALLBACK or force_fallback) else (primary,)
 
     errors = []
     for source in sources_to_try:
@@ -489,7 +489,7 @@ def _refresh_dashboard_cache() -> None:
             except Exception:
                 logger.exception("Google Sheets to MySQL sync failed during background refresh")
 
-        df = fetch_data()
+        df = fetch_data(force_fallback=True)
         children = build_dashboard_children(df)
         _set_cached_dashboard(children, time.time())
     except Exception:
@@ -516,7 +516,7 @@ def update_dashboard(_n_intervals):
         return cached_dashboard
 
     try:
-        df = fetch_data()
+        df = fetch_data(force_fallback=True)
         dashboard_children = build_dashboard_children(df)
         _set_cached_dashboard(dashboard_children, current_time)
         return dashboard_children
