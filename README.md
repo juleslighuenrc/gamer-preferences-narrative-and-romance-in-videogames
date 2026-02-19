@@ -1,6 +1,10 @@
 # Gamer Preferences: Narrative and Romance in Videogames
 
-Link: https://gamer-preferences-dashboard.onrender.com/
+Link: https://gamer-preferences-dashboard.onrender.com/  Note: first load may take 30-60s (Render free tier sleep)
+
+Snapshot highlights:
+![snapshot-narrative-importance](https://github.com/user-attachments/assets/5b78413d-3611-4701-b56f-3d92e1a6939c)
+![snapshot-orientation](https://github.com/user-attachments/assets/c6c31ab4-0548-468c-bd11-2090da809055)
 
 Dash Dashboard for Survey Responses (Anonymized & GitHub-safe)
 
