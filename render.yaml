@@ -30,9 +30,11 @@ services:
       - key: DASHBOARD_REFRESH_SECONDS
         value: "60"
       - key: DASHBOARD_CACHE_SECONDS
-        value: "120"
+        value: "300"
       - key: RUN_SYNC_IN_REQUEST
         value: "false"
+      - key: PREWARM_CACHE_ON_START
+        value: "true"
       - key: ENABLE_SOURCE_FALLBACK
         value: "false"
       - key: MYSQL_CONNECT_TIMEOUT_SECONDS

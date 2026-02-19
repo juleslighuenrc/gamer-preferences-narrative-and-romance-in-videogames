@@ -2,6 +2,7 @@ import os
 import json
 import time
 import logging
+import threading
 
 import dash
 from dash import dcc, html
@@ -39,9 +40,12 @@ MYSQL_CONNECT_TIMEOUT_SECONDS = int(os.getenv("MYSQL_CONNECT_TIMEOUT_SECONDS", "
 MYSQL_READ_TIMEOUT_SECONDS = int(os.getenv("MYSQL_READ_TIMEOUT_SECONDS", "15"))
 RUN_SYNC_IN_REQUEST = os.getenv("RUN_SYNC_IN_REQUEST", "false").lower() == "true"
 DASHBOARD_CACHE_SECONDS = int(os.getenv("DASHBOARD_CACHE_SECONDS", "120"))
+PREWARM_CACHE_ON_START = os.getenv("PREWARM_CACHE_ON_START", "true").lower() == "true"
 _last_sync_epoch = 0.0
 _last_dashboard_epoch = 0.0
 _cached_dashboard_children = None
+_cache_refresh_in_progress = False
+_cache_lock = threading.Lock()
 
 
 color_discrete = [
@@ -313,198 +317,220 @@ app.layout = html.Div(
 )
 
 
+def build_dashboard_children(df: pd.DataFrame):
+    if df.empty:
+        return html.Div(
+            "No rows found in the current data source yet.",
+            style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
+        )
+
+    drop_cols = {"timestamp", "marca temporal", "id"}
+    df = df.loc[:, [c for c in df.columns if c.lower() not in drop_cols]]
+
+    if df.empty or len(df.columns) == 0:
+        return html.Div(
+            "Data loaded, but no plottable columns were found after normalization.",
+            style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
+        )
+
+    def has_usable_data(col: str) -> bool:
+        if col not in df.columns:
+            return False
+        cleaned = (
+            df[col]
+            .dropna()
+            .astype(str)
+            .map(lambda value: value.strip())
+        )
+        cleaned = cleaned[cleaned != ""]
+        return not cleaned.empty
+
+    fig_inclusive = count_bar(df, "inclusive_interest", "Interest Due to Inclusive Options")
+
+    if "identity" in df.columns and "player_gender" in df.columns:
+        fig_identity = px.histogram(
+            df,
+            x="identity",
+            color="player_gender",
+            barmode="group",
+            color_discrete_sequence=color_discrete,
+        )
+        fig_identity = apply_figure_style(fig_identity, "Gender Identity vs. Player Gender Choice")
+        fig_identity.update_layout(showlegend=True)
+    else:
+        fig_identity = count_bar(df, "identity", "Gender Identity vs. Player Gender Choice")
+
+    fig_player_gender = count_bar(df, "player_gender", "Player Gender")
+
+    if "orientation" in df.columns and "orientation_importance" in df.columns:
+        fig_orientation = px.histogram(
+            df,
+            x="orientation",
+            color="orientation_importance",
+            barmode="group",
+            color_discrete_sequence=color_discrete,
+        )
+        fig_orientation = apply_figure_style(fig_orientation, "Sexual Orientation vs. Importance")
+        fig_orientation.update_layout(showlegend=True)
+    else:
+        fig_orientation = count_bar(df, "orientation", "Sexual Orientation vs. Importance")
+
+    fig_orientation_importance = count_bar(
+        df,
+        "orientation_importance",
+        "Orientation Importance",
+    )
+
+    def optimal_graph(col: str):
+        title = col.replace("_", " ").title()
+        unique_vals = df[col].nunique(dropna=False)
+        normalized_col = col.strip().lower()
+
+        if pd.api.types.is_numeric_dtype(df[col]) and unique_vals > 10:
+            fig = px.histogram(df, x=col, color_discrete_sequence=color_discrete)
+            fig.update_traces(marker_color=color_discrete[2])
+            return apply_figure_style(fig, title)
+
+        if unique_vals <= 5:
+            return count_bar(df, col, title, horizontal=True)
+
+        fig = count_bar(df, col, title, horizontal=False)
+        if (
+            normalized_col == "genres"
+            or "what games do you enjoy the most" in normalized_col
+        ):
+            fig.update_xaxes(tickangle=45, automargin=True)
+        return fig
+
+    remaining_cols = [
+        c
+        for c in df.columns
+        if c
+        not in [
+            "inclusive_interest",
+            "identity",
+            "player_gender",
+            "orientation",
+            "orientation_importance",
+        ]
+    ]
+
+    priority_card_items = []
+    if has_usable_data("inclusive_interest"):
+        priority_card_items.append(
+            html.Div([dcc.Graph(figure=fig_inclusive, style={"height": "420px"})], style={"minWidth": "360px"})
+        )
+    if has_usable_data("identity"):
+        priority_card_items.append(
+            html.Div([dcc.Graph(figure=fig_identity, style={"height": "420px"})], style={"minWidth": "360px"})
+        )
+    if has_usable_data("player_gender"):
+        priority_card_items.append(
+            html.Div([dcc.Graph(figure=fig_player_gender, style={"height": "420px"})], style={"minWidth": "360px"})
+        )
+    if has_usable_data("orientation"):
+        priority_card_items.append(
+            html.Div([dcc.Graph(figure=fig_orientation, style={"height": "420px"})], style={"minWidth": "360px"})
+        )
+    if has_usable_data("orientation_importance"):
+        priority_card_items.append(
+            html.Div([dcc.Graph(figure=fig_orientation_importance, style={"height": "420px"})], style={"minWidth": "360px"})
+        )
+
+    priority_cards = html.Div(
+        priority_card_items,
+        style={
+            "display": "grid",
+            "gridTemplateColumns": "repeat(auto-fit, minmax(420px, 1fr))",
+            "gap": "16px",
+            "alignItems": "stretch",
+        },
+    )
+
+    other_graphs = html.Div(
+        [
+            html.Div([dcc.Graph(figure=optimal_graph(col), style={"height": "360px"})], style={"minWidth": "360px"})
+            for col in remaining_cols
+        ],
+        style={
+            "display": "grid",
+            "gridTemplateColumns": "repeat(auto-fit, minmax(420px, 1fr))",
+            "gap": "16px",
+            "marginTop": "16px",
+            "alignItems": "stretch",
+        },
+    )
+
+    sections = []
+    if priority_card_items:
+        sections.append(priority_cards)
+    sections.append(other_graphs)
+    return html.Div(sections)
+
+
+def _get_cached_dashboard():
+    with _cache_lock:
+        return _cached_dashboard_children, _last_dashboard_epoch
+
+
+def _set_cached_dashboard(children, timestamp: float) -> None:
+    global _cached_dashboard_children, _last_dashboard_epoch
+    with _cache_lock:
+        _cached_dashboard_children = children
+        _last_dashboard_epoch = timestamp
+
+
+def _refresh_dashboard_cache() -> None:
+    global _cache_refresh_in_progress
+    try:
+        if RUN_SYNC_IN_REQUEST and DASHBOARD_SOURCE == "sql":
+            try:
+                sync_google_sheet_to_mysql()
+            except Exception:
+                logger.exception("Google Sheets to MySQL sync failed during background refresh")
+
+        df = fetch_data()
+        children = build_dashboard_children(df)
+        _set_cached_dashboard(children, time.time())
+    except Exception:
+        logger.exception("Background dashboard cache refresh failed")
+    finally:
+        _cache_refresh_in_progress = False
+
+
 @app.callback(
     dash.dependencies.Output("dashboard-content", "children"),
     [dash.dependencies.Input("refresh-interval", "n_intervals")],
 )
 def update_dashboard(_n_intervals):
-    global _last_dashboard_epoch, _cached_dashboard_children
+    global _cache_refresh_in_progress
 
     current_time = time.time()
-    if (
-        _cached_dashboard_children is not None
-        and current_time - _last_dashboard_epoch < DASHBOARD_CACHE_SECONDS
-    ):
-        return _cached_dashboard_children
+    cached_dashboard, cached_epoch = _get_cached_dashboard()
 
-    if RUN_SYNC_IN_REQUEST and DASHBOARD_SOURCE == "sql":
-        try:
-            sync_google_sheet_to_mysql()
-        except Exception:
-            logger.exception("Google Sheets to MySQL sync failed")
+    if cached_dashboard is not None:
+        cache_age = current_time - cached_epoch
+        if cache_age >= DASHBOARD_CACHE_SECONDS and not _cache_refresh_in_progress:
+            _cache_refresh_in_progress = True
+            threading.Thread(target=_refresh_dashboard_cache, daemon=True).start()
+        return cached_dashboard
 
     try:
         df = fetch_data()
-    except Exception:
-        logger.exception("Fetching dashboard data failed")
-        if _cached_dashboard_children is not None:
-            logger.warning("Serving stale cached dashboard due to data fetch failure")
-            return _cached_dashboard_children
-        return html.Div(
-            "Dashboard is online, but data is not available yet. Check GOOGLE_SHEET_NAME, GOOGLE_SERVICE_ACCOUNT_JSON, and Google Sheet sharing permissions.",
-            style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
-        )
-    try:
-        if df.empty:
-            return html.Div(
-                "No rows found in the current data source yet.",
-                style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
-            )
-
-        drop_cols = {"timestamp", "marca temporal", "id"}
-        df = df.loc[:, [c for c in df.columns if c.lower() not in drop_cols]]
-
-        if df.empty or len(df.columns) == 0:
-            return html.Div(
-                "Data loaded, but no plottable columns were found after normalization.",
-                style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
-            )
-
-        def has_usable_data(col: str) -> bool:
-            if col not in df.columns:
-                return False
-            cleaned = (
-                df[col]
-                .dropna()
-                .astype(str)
-                .map(lambda value: value.strip())
-            )
-            cleaned = cleaned[cleaned != ""]
-            return not cleaned.empty
-
-        fig_inclusive = count_bar(df, "inclusive_interest", "Interest Due to Inclusive Options")
-
-        if "identity" in df.columns and "player_gender" in df.columns:
-            fig_identity = px.histogram(
-                df,
-                x="identity",
-                color="player_gender",
-                barmode="group",
-                color_discrete_sequence=color_discrete,
-            )
-            fig_identity = apply_figure_style(fig_identity, "Gender Identity vs. Player Gender Choice")
-            fig_identity.update_layout(showlegend=True)
-        else:
-            fig_identity = count_bar(df, "identity", "Gender Identity vs. Player Gender Choice")
-
-        fig_player_gender = count_bar(df, "player_gender", "Player Gender")
-
-        if "orientation" in df.columns and "orientation_importance" in df.columns:
-            fig_orientation = px.histogram(
-                df,
-                x="orientation",
-                color="orientation_importance",
-                barmode="group",
-                color_discrete_sequence=color_discrete,
-            )
-            fig_orientation = apply_figure_style(fig_orientation, "Sexual Orientation vs. Importance")
-            fig_orientation.update_layout(showlegend=True)
-        else:
-            fig_orientation = count_bar(df, "orientation", "Sexual Orientation vs. Importance")
-
-        fig_orientation_importance = count_bar(
-            df,
-            "orientation_importance",
-            "Orientation Importance",
-        )
-
-        def optimal_graph(col: str):
-            title = col.replace("_", " ").title()
-            unique_vals = df[col].nunique(dropna=False)
-            normalized_col = col.strip().lower()
-
-            if pd.api.types.is_numeric_dtype(df[col]) and unique_vals > 10:
-                fig = px.histogram(df, x=col, color_discrete_sequence=color_discrete)
-                fig.update_traces(marker_color=color_discrete[2])
-                return apply_figure_style(fig, title)
-
-            if unique_vals <= 5:
-                return count_bar(df, col, title, horizontal=True)
-
-            fig = count_bar(df, col, title, horizontal=False)
-            if (
-                normalized_col == "genres"
-                or "what games do you enjoy the most" in normalized_col
-            ):
-                fig.update_xaxes(tickangle=45, automargin=True)
-            return fig
-
-        remaining_cols = [
-            c
-            for c in df.columns
-            if c
-            not in [
-                "inclusive_interest",
-                "identity",
-                "player_gender",
-                "orientation",
-                "orientation_importance",
-            ]
-        ]
-
-        priority_card_items = []
-        if has_usable_data("inclusive_interest"):
-            priority_card_items.append(
-                html.Div([dcc.Graph(figure=fig_inclusive, style={"height": "420px"})], style={"minWidth": "360px"})
-            )
-        if has_usable_data("identity"):
-            priority_card_items.append(
-                html.Div([dcc.Graph(figure=fig_identity, style={"height": "420px"})], style={"minWidth": "360px"})
-            )
-        if has_usable_data("player_gender"):
-            priority_card_items.append(
-                html.Div([dcc.Graph(figure=fig_player_gender, style={"height": "420px"})], style={"minWidth": "360px"})
-            )
-        if has_usable_data("orientation"):
-            priority_card_items.append(
-                html.Div([dcc.Graph(figure=fig_orientation, style={"height": "420px"})], style={"minWidth": "360px"})
-            )
-        if has_usable_data("orientation_importance"):
-            priority_card_items.append(
-                html.Div([dcc.Graph(figure=fig_orientation_importance, style={"height": "420px"})], style={"minWidth": "360px"})
-            )
-
-        priority_cards = html.Div(
-            priority_card_items,
-            style={
-                "display": "grid",
-                "gridTemplateColumns": "repeat(auto-fit, minmax(420px, 1fr))",
-                "gap": "16px",
-                "alignItems": "stretch",
-            },
-        )
-
-        other_graphs = html.Div(
-            [
-                html.Div([dcc.Graph(figure=optimal_graph(col), style={"height": "360px"})], style={"minWidth": "360px"})
-                for col in remaining_cols
-            ],
-            style={
-                "display": "grid",
-                "gridTemplateColumns": "repeat(auto-fit, minmax(420px, 1fr))",
-                "gap": "16px",
-                "marginTop": "16px",
-                "alignItems": "stretch",
-            },
-        )
-
-        sections = []
-        if priority_card_items:
-            sections.append(priority_cards)
-        sections.append(other_graphs)
-        dashboard_children = html.Div(sections)
-        _cached_dashboard_children = dashboard_children
-        _last_dashboard_epoch = current_time
+        dashboard_children = build_dashboard_children(df)
+        _set_cached_dashboard(dashboard_children, current_time)
         return dashboard_children
     except Exception:
-        logger.exception("Failed while building dashboard figures")
-        if _cached_dashboard_children is not None:
-            logger.warning("Serving stale cached dashboard due to render failure")
-            return _cached_dashboard_children
+        logger.exception("Failed while preparing initial dashboard")
         return html.Div(
-            "Data loaded, but chart rendering failed. Check Render logs for details.",
+            "Dashboard is online, but data is not available yet. Check GOOGLE_SHEET_NAME, GOOGLE_SERVICE_ACCOUNT_JSON, database connectivity, and Google Sheet sharing permissions.",
             style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
         )
+
+
+if PREWARM_CACHE_ON_START:
+    _cache_refresh_in_progress = True
+    threading.Thread(target=_refresh_dashboard_cache, daemon=True).start()
 
 
 if __name__ == "__main__":
