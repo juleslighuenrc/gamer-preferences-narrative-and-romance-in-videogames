@@ -307,10 +307,11 @@ app.layout = html.Div(
     [dash.dependencies.Input("refresh-interval", "n_intervals")],
 )
 def update_dashboard(_n_intervals):
-    try:
-        sync_google_sheet_to_mysql()
-    except Exception:
-        logger.exception("Google Sheets to MySQL sync failed")
+    if DASHBOARD_SOURCE == "sql":
+        try:
+            sync_google_sheet_to_mysql()
+        except Exception:
+            logger.exception("Google Sheets to MySQL sync failed")
     try:
         df = fetch_data()
     except Exception:
@@ -334,6 +335,18 @@ def update_dashboard(_n_intervals):
                 "Data loaded, but no plottable columns were found after normalization.",
                 style={"fontFamily": "Arial", "fontSize": "14px", "color": "black", "padding": "12px"},
             )
+
+        def has_usable_data(col: str) -> bool:
+            if col not in df.columns:
+                return False
+            cleaned = (
+                df[col]
+                .dropna()
+                .astype(str)
+                .map(lambda value: value.strip())
+            )
+            cleaned = cleaned[cleaned != ""]
+            return not cleaned.empty
 
         fig_inclusive = count_bar(df, "inclusive_interest", "Interest Due to Inclusive Options")
 
@@ -383,7 +396,10 @@ def update_dashboard(_n_intervals):
             if unique_vals <= 5:
                 return count_bar(df, col, title, horizontal=True)
 
-            return count_bar(df, col, title, horizontal=False)
+            fig = count_bar(df, col, title, horizontal=False)
+            if col == "genres":
+                fig.update_xaxes(tickangle=45, automargin=True)
+            return fig
 
         remaining_cols = [
             c
@@ -398,14 +414,30 @@ def update_dashboard(_n_intervals):
             ]
         ]
 
+        priority_card_items = []
+        if has_usable_data("inclusive_interest"):
+            priority_card_items.append(
+                html.Div([dcc.Graph(figure=fig_inclusive, style={"height": "420px"})], style={"minWidth": "360px"})
+            )
+        if has_usable_data("identity"):
+            priority_card_items.append(
+                html.Div([dcc.Graph(figure=fig_identity, style={"height": "420px"})], style={"minWidth": "360px"})
+            )
+        if has_usable_data("player_gender"):
+            priority_card_items.append(
+                html.Div([dcc.Graph(figure=fig_player_gender, style={"height": "420px"})], style={"minWidth": "360px"})
+            )
+        if has_usable_data("orientation"):
+            priority_card_items.append(
+                html.Div([dcc.Graph(figure=fig_orientation, style={"height": "420px"})], style={"minWidth": "360px"})
+            )
+        if has_usable_data("orientation_importance"):
+            priority_card_items.append(
+                html.Div([dcc.Graph(figure=fig_orientation_importance, style={"height": "420px"})], style={"minWidth": "360px"})
+            )
+
         priority_cards = html.Div(
-            [
-                html.Div([dcc.Graph(figure=fig_inclusive, style={"height": "420px"})], style={"minWidth": "360px"}),
-                html.Div([dcc.Graph(figure=fig_identity, style={"height": "420px"})], style={"minWidth": "360px"}),
-                html.Div([dcc.Graph(figure=fig_player_gender, style={"height": "420px"})], style={"minWidth": "360px"}),
-                html.Div([dcc.Graph(figure=fig_orientation, style={"height": "420px"})], style={"minWidth": "360px"}),
-                html.Div([dcc.Graph(figure=fig_orientation_importance, style={"height": "420px"})], style={"minWidth": "360px"}),
-            ],
+            priority_card_items,
             style={
                 "display": "grid",
                 "gridTemplateColumns": "repeat(auto-fit, minmax(420px, 1fr))",
@@ -428,7 +460,11 @@ def update_dashboard(_n_intervals):
             },
         )
 
-        return html.Div([priority_cards, other_graphs])
+        sections = []
+        if priority_card_items:
+            sections.append(priority_cards)
+        sections.append(other_graphs)
+        return html.Div(sections)
     except Exception:
         logger.exception("Failed while building dashboard figures")
         return html.Div(
