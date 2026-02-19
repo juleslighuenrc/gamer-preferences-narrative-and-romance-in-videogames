@@ -260,7 +260,10 @@ def apply_figure_style(fig, title_text: str):
     return fig
 
 
-def count_bar(df: pd.DataFrame, col: str, title: str, horizontal: bool = False):
+MULTISELECT_COLUMNS = {"genres", "genre", "géneros", "generos", "what games do you enjoy the most? select up to two"}
+
+
+def count_bar(df: pd.DataFrame, col: str, title: str, horizontal: bool = False, split_multiselect: bool = False):
     if col not in df.columns:
         fig = px.bar(
             pd.DataFrame({"value": ["No data available"], "count": [0]}),
@@ -271,7 +274,14 @@ def count_bar(df: pd.DataFrame, col: str, title: str, horizontal: bool = False):
         )
         return apply_figure_style(fig, title)
 
-    counts = df[col].fillna("Missing").astype(str).value_counts().reset_index()
+    if split_multiselect:
+        all_values = []
+        for raw_val in df[col].fillna("Missing").astype(str):
+            parts = [p.strip() for p in raw_val.replace(";", ",").split(",") if p.strip()]
+            all_values.extend(parts if parts else ["Missing"])
+        counts = pd.Series(all_values).value_counts().reset_index()
+    else:
+        counts = df[col].fillna("Missing").astype(str).value_counts().reset_index()
     counts.columns = ["value", "count"]
 
     if horizontal:
@@ -394,11 +404,9 @@ def build_dashboard_children(df: pd.DataFrame):
         if unique_vals <= 5:
             return count_bar(df, col, title, horizontal=True)
 
-        fig = count_bar(df, col, title, horizontal=False)
-        if (
-            normalized_col == "genres"
-            or "what games do you enjoy the most" in normalized_col
-        ):
+        is_multiselect = normalized_col in MULTISELECT_COLUMNS or "what games do you enjoy the most" in normalized_col
+        fig = count_bar(df, col, title, horizontal=False, split_multiselect=is_multiselect)
+        if is_multiselect:
             fig.update_xaxes(tickangle=45, automargin=True)
         return fig
 
